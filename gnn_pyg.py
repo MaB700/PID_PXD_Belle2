@@ -1,103 +1,44 @@
 # %%
 import numpy as np
-import pandas as pd
-import random
 from tqdm import tqdm
 import torch
-import torch.nn as nn
-from torch_geometric.utils.convert import to_networkx
-from torch_geometric.nn import (
-    NNConv,
-    global_mean_pool,
-    graclus,
-    max_pool,
-    max_pool_x,
-)
-from torch_geometric.loader import DataLoader
-from torch_geometric.data import Dataset
-from torch_geometric.data.data import Data
-from torch.nn import Linear
-from torch import Tensor
 import torch.nn.functional as F
-from torch_geometric.nn import GCNConv, ARMAConv
-from torch_geometric.nn import global_mean_pool
+from torch_geometric.loader import DataLoader
+
+from sklearn.metrics import roc_auc_score
 
 import networkx as nx
+from torch_geometric.utils.convert import to_networkx
 
-
-# %%
-
-def CreateGraphDataset(path, n_samples, label):        
-    data = pd.read_csv(path, header=None, delimiter= " ", nrows=n_samples).values.astype('int')
-    def make_graph(index):     
-        # Load num filled pixels & ADC values
-        n = np.count_nonzero(data[index, 2:83] > 0)
-        adc_indices = np.nonzero(data[index, 2:83])
-        adc = data[index, 2:83][adc_indices]
-        seed_index = np.argmax(adc) # TODO: can 2+ pixels have the adc of seed pixel ?
-        y_pos, x_pos = np.divmod(adc_indices, 9)
-        
-        # Node features
-        x = np.zeros((n, 3)) # num node features
-        x[:, 0] = (adc.astype('float64'))/255.0
-        x[:, 1] = (x_pos.astype('float64'))/8.0 # x_coord [0,1]
-        x[:, 2] = (y_pos.astype('float64'))/8.0 # y_coord [0,1]
-        
-        # Edges
-        if n > 1 :
-            a = np.full((n - 1), seed_index)
-            b = np.delete(np.arange(0, n), seed_index)
-            # a = np.full((n), seed_index)
-            # b = np.arange(0, n)
-            edge_index = np.row_stack((np.concatenate((a,b)), np.concatenate((b,a))))   
-            edge_index = torch.from_numpy(edge_index)       
-        else :
-            edge_index = torch.from_numpy(np.row_stack(([0], [0])))
-        
-        # Labels
-        y = torch.tensor([np.double(label)])       
-        
-        return Data(x=torch.from_numpy(x), edge_index=edge_index, y=y)
-
-    return [make_graph(i) for i in tqdm(range(n_samples))]
+from helpers import CreateGraphDataset, Net
 
 # %%
-batch_size=1024
-pion_graphs = CreateGraphDataset("E:\ML_data/vt/data/slow_pions_evtgen_big.txt", 50000, 1.0)
-bg_graphs = CreateGraphDataset("E:\ML_data/vt/data/protons_big.txt", 50000, 0.0)
-data_list = pion_graphs + bg_graphs
-#data_list = data_list[data_list]
-random.shuffle(data_list)
-train_loader = DataLoader(data_list[:80000], batch_size=32, shuffle=True)
-val_loader = DataLoader(data_list[80000:], batch_size=32)
+batch_size = 1024
+epochs = 50
+es_patience = 5
+nEventsEach = 100000
 
+data = CreateGraphDataset("E:\ML_data/vt/data/slow_pions_evtgen_big.txt", nEventsEach, 1.0) \
+     + CreateGraphDataset("E:\ML_data/vt/data/protons_big.txt", nEventsEach, 0.0)
+
+np.random.seed(123)
+idxs = np.random.permutation(len(data))
+idx_train, idx_val, idx_test = np.split(idxs, [int(0.6 * len(data)), int(0.8 * len(data))])
+
+train_loader = DataLoader([data[index] for index in idx_train], batch_size=batch_size, shuffle=True)
+val_loader = DataLoader([data[index] for index in idx_val], batch_size=batch_size)
+test_loader = DataLoader([data[index] for index in idx_test], batch_size=batch_size)
+test_loader1 = DataLoader([data[index] for index in idx_test if data[index].num_nodes == 1], batch_size=batch_size)
+test_loader2 = DataLoader([data[index] for index in idx_test if data[index].num_nodes == 2], batch_size=batch_size)
+test_loader3 = DataLoader([data[index] for index in idx_test if data[index].num_nodes > 2], batch_size=batch_size)
 # %%
-
-class Net(torch.nn.Module):
-    def __init__(self, n_node_feats, dim_out):
-        super(Net, self).__init__()
-        self.conv1 = ARMAConv(n_node_feats, 32)
-        self.conv2 = ARMAConv(32, 32)
-        self.conv3 = ARMAConv(32, 32)
-        self.dense = torch.nn.Linear(32, dim_out)
-        self.double()
-
-    def forward(self, data):
-        x, edge_index = data.x, data.edge_index
-        x = F.relu(self.conv1(x, edge_index))
-        x = F.relu(self.conv2(x, edge_index))
-        x = F.relu(self.conv3(x, edge_index))
-        #x = F.dropout(x, training=self.training)
-        out = global_mean_pool(x, data.batch)
-        out = F.sigmoid(self.dense(out))
-        return out
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = Net(3, 1).to(device) # .float()
+print(model)
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
-
-def train():
+def train_step():
     model.train()
     all_loss = 0
     i = 0.0
@@ -111,25 +52,60 @@ def train():
         loss.backward()
         optimizer.step()
 
-        # print('Accuracy: ', (torch.argmax(output, dim=1)==data.y.unsqueeze(1)).float().mean())
-    return(all_loss/i)
+    return all_loss/i
 
-def test():
+def evaluate(loader):
     model.eval()
-    correct = 0
-
-    for data in val_loader:
+    all_loss = 0
+    i = 0.0
+    for data in loader:
         data = data.to(device)
-        pred = model(data).max(1)[1]
-        correct += pred.eq(data.y).sum().item()
-    return correct / 5000.0
+        output = model(data)
+        loss = F.binary_cross_entropy(output, data.y.unsqueeze(1), reduction="mean")
+        all_loss += loss.item()
+        i += 1.0
+    
+    return all_loss/i
 
+best_val_loss = np.inf
+patience = es_patience
 
-for epoch in range(1, 31):
-    train_loss = train()
-    # test_acc = test()
-    print(f'Epoch: {epoch:02d}, loss: {train_loss:.5f}')
+for epoch in range(1, epochs + 1):
+    train_loss = train_step()
+    val_loss = evaluate(val_loader)
+    print(f'Epoch: {epoch:02d}, loss: {train_loss:.5f}, val_loss: {val_loss:.5f}')
 
+    if val_loss < best_val_loss :
+        best_val_loss = val_loss
+        patience = es_patience
+        print("New best val_loss {:.4f}".format(val_loss))
+        torch.save(model.state_dict(), 'model_best.pt')
+    else :
+        patience -= 1
+        if patience == 0:
+            print("Early stopping (best val_loss: {})".format(best_val_loss))
+            break
+    
+def predict(loader):
+    model.eval()
+    tar = np.empty((0))
+    prd = np.empty((0))
+    for data in loader :
+        data = data.to(device)
+        pred = model(data).squeeze(1).cpu().detach().numpy()
+        target = data.y.cpu().detach().numpy()
+        tar = np.append(tar, target)
+        prd = np.append(prd, np.array(pred))
+    return tar, prd
 
+# %%
 
+model.load_state_dict(torch.load('model_best.pt'))
+model.eval()
+loss_test = evaluate(test_loader)
+print("Test_loss {:.4f}".format(loss_test))
+
+test_gt, test_pred = predict(test_loader)
+test_auc = roc_auc_score(test_gt, test_pred)
+print("Test AUC: {:.4f}".format(test_auc))
 # %%

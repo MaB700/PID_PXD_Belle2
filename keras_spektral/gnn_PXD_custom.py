@@ -17,7 +17,7 @@ from spektral.transforms.normalize_adj import NormalizeAdj
 
 import wandb
 
-from helpers import *
+from helpers_keras import *
 
 # %%
 """ Create graphs """
