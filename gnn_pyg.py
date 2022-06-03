@@ -11,7 +11,7 @@ import wandb
 import networkx as nx
 from torch_geometric.utils.convert import to_networkx
 
-from helpers import CreateGraphDataset, Net
+from helpers import CreateGraphDataset, LogWandb, Net
 
 wandb.init(project="PXD_SP") # , mode="disabled"  
 
@@ -35,10 +35,11 @@ test_loader = DataLoader([data[index] for index in idx_test], batch_size=batch_s
 test_loader1 = DataLoader([data[index] for index in idx_test if data[index].num_nodes == 1], batch_size=batch_size)
 test_loader2 = DataLoader([data[index] for index in idx_test if data[index].num_nodes == 2], batch_size=batch_size)
 test_loader3 = DataLoader([data[index] for index in idx_test if data[index].num_nodes > 2], batch_size=batch_size)
+
 # %%
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = Net(3, 1).to(device) # .float()
+model = Net(3, 1, 64).to(device) # .float()
 print(model)
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
@@ -107,18 +108,7 @@ def predict(loader):
 cut = 0.5
 model.load_state_dict(torch.load('model_best.pt'))
 model.eval()
-test_loss = evaluate(test_loader)
-print("Test_loss {:.4f}".format(test_loss))
+# test_loss = evaluate(test_loader1)
+# print("Test_loss {:.4f}".format(test_loss))
 
-test_gt, test_pred = predict(test_loader)
-test_auc = roc_auc_score(test_gt, test_pred)
-print("Test AUC: {:.4f}".format(test_auc))
-wandb.log({"test_loss": test_loss, "test_auc": test_auc})
-# tn, fp, fn, tp = confusion_matrix(y_true=[1 if a_ > 0.5 else 0 for a_ in test_gt], y_pred=[1 if a_ > 0.5 else 0 for a_ in test_pred], labels=["background", "signal"])
-
-# TODO: write function fct(loader0, loader1, ...) return sensitifity0, specifity0, ...
-# need to pass model, device aswell if put in helpers.py
-# or no return, print(...) and log everything to wandb
-# 4 roc curves, 4 cm, ...
-# may only pass [data[index] for index in idx_test]
-# loop 4 times add ['all', '1', '2', '3+'] to wandb.log strings
+LogWandb([data[index] for index in idx_test], model, device, 32)

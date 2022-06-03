@@ -5,7 +5,11 @@ import torch
 from torch_geometric.data.data import Data
 from torch.nn import Linear
 import torch.nn.functional as F
-from torch_geometric.nn import GCNConv, ARMAConv, global_mean_pool
+from torch_geometric.nn import GCNConv, ARMAConv, GENConv, GeneralConv, global_mean_pool
+from torch_geometric.loader import DataLoader
+
+from sklearn.metrics import roc_auc_score, confusion_matrix
+import wandb
 
 def CreateGraphDataset(path, n_samples, label):        
     data = pd.read_csv(path, header=None, delimiter= " ", nrows=n_samples).values.astype('int')
@@ -32,7 +36,7 @@ def CreateGraphDataset(path, n_samples, label):
             edge_index = np.row_stack((np.concatenate((a,b)), np.concatenate((b,a))))   
             edge_index = torch.from_numpy(edge_index)       
         else :
-            edge_index = torch.from_numpy(np.row_stack(([0], [0])))
+            edge_index = (torch.from_numpy(np.row_stack(([0], [0])))).long()
         
         # Labels
         y = torch.tensor([np.double(label)])       
@@ -43,12 +47,12 @@ def CreateGraphDataset(path, n_samples, label):
 
 
 class Net(torch.nn.Module):
-    def __init__(self, n_node_feats, dim_out):
+    def __init__(self, n_node_feats, dim_out, hidden_nodes):
         super(Net, self).__init__()
-        self.conv1 = ARMAConv(n_node_feats, 32)
-        self.conv2 = ARMAConv(32, 32)
-        self.conv3 = ARMAConv(32, 32)
-        self.dense = Linear(32, dim_out)
+        self.conv1 = GENConv(n_node_feats, hidden_nodes)
+        self.conv2 = GENConv(hidden_nodes, hidden_nodes)
+        self.conv3 = GENConv(hidden_nodes, hidden_nodes)
+        self.dense = Linear(hidden_nodes, dim_out)
         self.double()
 
     def forward(self, data):
@@ -60,3 +64,54 @@ class Net(torch.nn.Module):
         out = global_mean_pool(x, data.batch)
         out = torch.sigmoid(self.dense(out))
         return out
+
+
+class LogWandb():
+    def __init__(self, data, model, device, batch_size):
+        self.model = model
+        self.device = device
+        self.loaders = [DataLoader(data, batch_size=batch_size), \
+                        DataLoader([d for d in data if d.num_nodes == 1], batch_size=batch_size), \
+                        DataLoader([d for d in data if d.num_nodes == 2], batch_size=batch_size), \
+                        DataLoader([d for d in data if d.num_nodes > 2], batch_size=batch_size) ]
+        self.log_all()
+
+    def predict(self, loader):
+        self.model.eval()
+        tar = np.empty((0))
+        prd = np.empty((0))
+        for data in loader :
+            data = data.to(self.device)
+            pred = self.model(data).squeeze(1).cpu().detach().numpy()
+            target = data.y.cpu().detach().numpy()
+            tar = np.append(tar, target)
+            prd = np.append(prd, np.array(pred))
+        return tar, prd
+
+    def log_all(self):
+        
+        def run(i):
+            gt, pred = self.predict(self.loaders[i])
+            auc = roc_auc_score(gt, pred)
+            wandb.log({"test_auc{:d}".format(i): auc})
+
+            tn, fp, fn, tp = confusion_matrix(y_true=[1 if a_ > 0.5 else 0 for a_ in gt], \
+                                              y_pred=[1 if a_ > 0.5 else 0 for a_ in pred]).ravel()
+            wandb.log({"test_prec{:d}".format(i): tp/(tp+fn)}) # efficiency
+            wandb.log({"test_sens{:d}".format(i): tp/(tp+fp)}) # purity
+
+            wandb.log({"cm{:d}".format(i): wandb.plot.confusion_matrix(   probs=None, 
+                                                y_true=[1 if a_ > 0.5 else 0 for a_ in gt], 
+                                                preds=[1 if a_ > 0.5 else 0 for a_ in pred], 
+                                                class_names=["background", "signal"],
+                                                title="CM{:d}".format(i))})
+
+            wandb.log({"roc{:d}".format(i): wandb.plot.roc_curve( gt, 
+                                        np.concatenate(((1-pred).reshape(-1,1),pred.reshape(-1,1)),axis=1), 
+                                        classes_to_plot=[1],
+                                        title="ROC{:d}".format(i))})
+
+
+        for i in range(4):
+            run(i)
+
