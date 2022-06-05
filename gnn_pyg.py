@@ -13,35 +13,36 @@ from torch_geometric.utils.convert import to_networkx
 
 from helpers import CreateGraphDataset, LogWandb, Net
 
-wandb.init(project="PXD_SP") # , mode="disabled"  
+wandb.init(project="PXD_SP") #   , mode="disabled"
 
 
 # %%
 batch_size = 1024
 epochs = 50
 es_patience = 5
-nEventsEach = 100000
+nEventsEach = 500000
 
 data = CreateGraphDataset("E:\ML_data/vt/data/slow_pions_evtgen_big.txt", nEventsEach, 1.0) \
      + CreateGraphDataset("E:\ML_data/vt/data/protons_big.txt", nEventsEach, 0.0)
 
+# %%
 np.random.seed(123)
 idxs = np.random.permutation(len(data))
 idx_train, idx_val, idx_test = np.split(idxs, [int(0.6 * len(data)), int(0.8 * len(data))])
 
 train_loader = DataLoader([data[index] for index in idx_train], batch_size=batch_size, shuffle=True)
 val_loader = DataLoader([data[index] for index in idx_val], batch_size=batch_size)
-test_loader = DataLoader([data[index] for index in idx_test], batch_size=batch_size)
-test_loader1 = DataLoader([data[index] for index in idx_test if data[index].num_nodes == 1], batch_size=batch_size)
-test_loader2 = DataLoader([data[index] for index in idx_test if data[index].num_nodes == 2], batch_size=batch_size)
-test_loader3 = DataLoader([data[index] for index in idx_test if data[index].num_nodes > 2], batch_size=batch_size)
+# test_loader = DataLoader([data[index] for index in idx_test], batch_size=batch_size)
+# test_loader1 = DataLoader([data[index] for index in idx_test if data[index].num_nodes == 1], batch_size=batch_size)
+# test_loader2 = DataLoader([data[index] for index in idx_test if data[index].num_nodes == 2], batch_size=batch_size)
+# test_loader3 = DataLoader([data[index] for index in idx_test if data[index].num_nodes > 2], batch_size=batch_size)
 
 # %%
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = Net(3, 1, 64).to(device) # .float()
+model = Net(data[0], 1, 64).to(device) # .float() # pass data[0] to get node/edge_feature amount
 print(model)
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
 def train_step():
     model.train()
@@ -111,4 +112,4 @@ model.eval()
 # test_loss = evaluate(test_loader1)
 # print("Test_loss {:.4f}".format(test_loss))
 
-LogWandb([data[index] for index in idx_test], model, device, 32)
+LogWandb([data[index] for index in idx_test], model, device, 1024)

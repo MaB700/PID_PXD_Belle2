@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import math
 from tqdm import tqdm
 import torch
 from torch_geometric.data.data import Data
@@ -23,7 +24,7 @@ def CreateGraphDataset(path, n_samples, label):
         
         # Node features
         x = np.zeros((n, 3)) # num node features
-        x[:, 0] = (adc.astype('float64'))/255.0
+        x[:, 0] = (adc.astype('float64'))/255.0 # adc [0, 1]
         x[:, 1] = (x_pos.astype('float64'))/8.0 # x_coord [0,1]
         x[:, 2] = (y_pos.astype('float64'))/8.0 # y_coord [0,1]
         
@@ -38,28 +39,50 @@ def CreateGraphDataset(path, n_samples, label):
         else :
             edge_index = (torch.from_numpy(np.row_stack(([0], [0])))).long()
         
+        # Edge features
+        edge_features = np.zeros((edge_index.shape[1], 2))
+        if n > 1 :
+            for i in range(edge_index.shape[1]):
+                x0 = x[edge_index[0, i].item(), 1] # i in range(0, edges)
+                y0 = x[edge_index[0, i].item(), 2]
+                x1 = x[edge_index[1, i].item(), 1]
+                y1 = x[edge_index[1, i].item(), 2]
+                edge_features[i, 0] = math.sqrt( ((x1-x0)**2 + (y1-y0)**2)/2.0 ) # node distance [0, 1]
+                edge_features[i, 1] = x[edge_index[1, i].item(), 0] - x[edge_index[0, i].item(), 0] # adc diff [-1, 1]
+            
+        edge_features = torch.from_numpy(edge_features)
+        
+        
         # Labels
         y = torch.tensor([np.double(label)])       
         
-        return Data(x=torch.from_numpy(x), edge_index=edge_index, y=y)
+        return Data(x=torch.from_numpy(x), edge_index=edge_index, edge_attr=edge_features, y=y)
 
     return [make_graph(i) for i in tqdm(range(n_samples))]
 
 
 class Net(torch.nn.Module):
-    def __init__(self, n_node_feats, dim_out, hidden_nodes):
+    def __init__(self, data, dim_out, hidden_nodes):
         super(Net, self).__init__()
-        self.conv1 = GENConv(n_node_feats, hidden_nodes)
+        
+        self.node_encoder = Linear(data.x.size(-1), hidden_nodes)
+        self.edge_encoder = Linear(data.edge_attr.size(-1), hidden_nodes)
+        
+        self.conv1 = GENConv(hidden_nodes, hidden_nodes)
         self.conv2 = GENConv(hidden_nodes, hidden_nodes)
         self.conv3 = GENConv(hidden_nodes, hidden_nodes)
         self.dense = Linear(hidden_nodes, dim_out)
         self.double()
 
     def forward(self, data):
-        x, edge_index = data.x, data.edge_index
-        x = F.relu(self.conv1(x, edge_index))
-        x = F.relu(self.conv2(x, edge_index))
-        x = F.relu(self.conv3(x, edge_index))
+        x, edge_index, edge_attr = data.x, data.edge_index, data.edge_attr
+        
+        x = self.node_encoder(x)
+        edge_attr = self.edge_encoder(edge_attr)
+
+        x = F.relu(self.conv1(x, edge_index, edge_attr))
+        x = F.relu(self.conv2(x, edge_index, edge_attr))
+        x = F.relu(self.conv3(x, edge_index, edge_attr))
         #x = F.dropout(x, training=self.training)
         out = global_mean_pool(x, data.batch)
         out = torch.sigmoid(self.dense(out))
@@ -94,7 +117,7 @@ class LogWandb():
             gt, pred = self.predict(self.loaders[i])
             auc = roc_auc_score(gt, pred)
             wandb.log({"test_auc{:d}".format(i): auc})
-
+            # TODO: find 'best' cut value
             tn, fp, fn, tp = confusion_matrix(y_true=[1 if a_ > 0.5 else 0 for a_ in gt], \
                                               y_pred=[1 if a_ > 0.5 else 0 for a_ in pred]).ravel()
             wandb.log({"test_prec{:d}".format(i): tp/(tp+fn)}) # efficiency
