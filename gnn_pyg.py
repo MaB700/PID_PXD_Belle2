@@ -18,12 +18,12 @@ wandb.init(project="PXD_SP") #   , mode="disabled"
 
 # %%
 batch_size = 1024
-epochs = 50
+epochs = 100
 es_patience = 5
 nEventsEach = 500000
 
 data = CreateGraphDataset("E:\ML_data/vt/data/slow_pions_evtgen_big.txt", nEventsEach, 1.0) \
-     + CreateGraphDataset("E:\ML_data/vt/data/protons_big.txt", nEventsEach, 0.0)
+     + CreateGraphDataset("E:\ML_data/vt/data/electron_big.txt", nEventsEach, 0.0)
 
 # %%
 np.random.seed(123)
@@ -106,7 +106,6 @@ def predict(loader):
     return tar, prd
 
 # %%
-cut = 0.5
 model.load_state_dict(torch.load('model_best.pt'))
 model.eval()
 # test_loss = evaluate(test_loader1)

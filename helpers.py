@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from torch_geometric.nn import GCNConv, ARMAConv, GENConv, GeneralConv, global_mean_pool
 from torch_geometric.loader import DataLoader
 
-from sklearn.metrics import roc_auc_score, confusion_matrix
+from sklearn.metrics import roc_auc_score, confusion_matrix, roc_curve
 import wandb
 
 def CreateGraphDataset(path, n_samples, label):        
@@ -21,6 +21,14 @@ def CreateGraphDataset(path, n_samples, label):
         adc = data[index, 2:83][adc_indices]
         seed_index = np.argmax(adc) # TODO: can 2+ pixels have the adc of seed pixel ?
         y_pos, x_pos = np.divmod(adc_indices, 9)
+        # x_grad, y_grad = 0.0
+        # for i in range(n):
+        #     if i == seed_index :
+        #         continue
+        #     r_2 = (x_pos[i] - x_pos[seed_index])**2 + (y_pos[i] - y_pos[seed_index])**2
+        #     adc_diff = - adc[i] + adc[seed_index] # -grad
+        #     x_grad += (adc_diff*(x_pos[i]-x_pos[seed_index])/8.0)/r_2
+        #     y_grad += (adc_diff*(y_pos[i]-y_pos[seed_index])/8.0)/r_2
         
         # Node features
         x = np.zeros((n, 3)) # num node features
@@ -112,20 +120,19 @@ class LogWandb():
         return tar, prd
 
     def log_all(self):
-        
-        def run(i):
+
+        def run(i, cut_value):
             gt, pred = self.predict(self.loaders[i])
             auc = roc_auc_score(gt, pred)
             wandb.log({"test_auc{:d}".format(i): auc})
-            # TODO: find 'best' cut value
-            tn, fp, fn, tp = confusion_matrix(y_true=[1 if a_ > 0.5 else 0 for a_ in gt], \
-                                              y_pred=[1 if a_ > 0.5 else 0 for a_ in pred]).ravel()
+            tn, fp, fn, tp = confusion_matrix(y_true=[1 if a_ > cut_value else 0 for a_ in gt], \
+                                              y_pred=[1 if a_ > cut_value else 0 for a_ in pred]).ravel()
             wandb.log({"test_prec{:d}".format(i): tp/(tp+fn)}) # efficiency
             wandb.log({"test_sens{:d}".format(i): tp/(tp+fp)}) # purity
 
-            wandb.log({"cm{:d}".format(i): wandb.plot.confusion_matrix(   probs=None, 
-                                                y_true=[1 if a_ > 0.5 else 0 for a_ in gt], 
-                                                preds=[1 if a_ > 0.5 else 0 for a_ in pred], 
+            wandb.log({"cm{:d}".format(i): wandb.plot.confusion_matrix(   probs=None,
+                                                y_true=[1 if a_ > cut_value else 0 for a_ in gt],
+                                                preds=[1 if a_ > cut_value else 0 for a_ in pred],
                                                 class_names=["background", "signal"],
                                                 title="CM{:d}".format(i))})
 
@@ -134,7 +141,17 @@ class LogWandb():
                                         classes_to_plot=[1],
                                         title="ROC{:d}".format(i))})
 
-
+        def calcCut():
+            gt, pred = self.predict(self.loaders[0])
+            fpr, tpr, ths = roc_curve(gt, pred)
+            index = np.argmax(tpr - fpr)
+            cut = ths[index]
+            print("best cut value: {:.3f}".format(cut))
+            return cut
+        
+        cut = calcCut()
+        wandb.log({"cut_value": cut})
+        
         for i in range(4):
-            run(i)
+            run(i, cut)
 
