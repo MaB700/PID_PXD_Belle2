@@ -11,13 +11,13 @@ import wandb
 import networkx as nx
 from torch_geometric.utils.convert import to_networkx
 
-from helpers import CreateGraphDataset, LogWandb, Net
+from helpers_gnn import CreateGraphDataset, LogWandb, Net
 
-wandb.init(project="PXD_SP") #   , mode="disabled"
+wandb.init(project="PXD_SP" ) #  , mode="disabled"
 
 
 # %%
-batch_size = 1024
+batch_size = 256
 epochs = 100
 es_patience = 5
 nEventsEach = 500000

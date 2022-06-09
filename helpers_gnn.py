@@ -14,6 +14,7 @@ import wandb
 
 def CreateGraphDataset(path, n_samples, label):        
     data = pd.read_csv(path, header=None, delimiter= " ", nrows=n_samples).values.astype('int')
+    global_pos = pd.read_csv(path, header=None, delimiter= " ", nrows=n_samples).values[:, 83:86]
     def make_graph(index):     
         # Load num filled pixels & ADC values
         n = np.count_nonzero(data[index, 2:83] > 0)
@@ -62,9 +63,17 @@ def CreateGraphDataset(path, n_samples, label):
         
         
         # Labels
-        y = torch.tensor([np.double(label)])       
+        y = torch.tensor([np.double(label)])
+
+        # Graph features
+        # x [-2, 2] y [-2, 2] z [-8 , 8] r [0, 2]
+        r = math.sqrt(global_pos[index, 0]**2 + global_pos[index, 1]**2)
+        r = 0.0 if r < 2 else 1.0
+        phi = np.arctan2(global_pos[index, 1], global_pos[index, 0])
+        z = (global_pos[index, 2])/8.0
+        g = torch.tensor([r, math.sin(phi), z]).unsqueeze(0) # [0 or 1], [-1, 1], [-1, 1]
         
-        return Data(x=torch.from_numpy(x), edge_index=edge_index, edge_attr=edge_features, y=y)
+        return Data(x=torch.from_numpy(x), edge_index=edge_index, edge_attr=edge_features, y=y, graph_attr=g)
 
     return [make_graph(i) for i in tqdm(range(n_samples))]
 
@@ -79,11 +88,11 @@ class Net(torch.nn.Module):
         self.conv1 = GENConv(hidden_nodes, hidden_nodes)
         self.conv2 = GENConv(hidden_nodes, hidden_nodes)
         self.conv3 = GENConv(hidden_nodes, hidden_nodes)
-        self.dense = Linear(hidden_nodes, dim_out)
+        self.dense = Linear(hidden_nodes + data.graph_attr.size(-1), dim_out)
         self.double()
 
     def forward(self, data):
-        x, edge_index, edge_attr = data.x, data.edge_index, data.edge_attr
+        x, edge_index, edge_attr, graph_attr = data.x, data.edge_index, data.edge_attr, data.graph_attr
         
         x = self.node_encoder(x)
         edge_attr = self.edge_encoder(edge_attr)
@@ -92,7 +101,7 @@ class Net(torch.nn.Module):
         x = F.relu(self.conv2(x, edge_index, edge_attr))
         x = F.relu(self.conv3(x, edge_index, edge_attr))
         #x = F.dropout(x, training=self.training)
-        out = global_mean_pool(x, data.batch)
+        out = torch.cat((global_mean_pool(x, data.batch), graph_attr), dim=1)
         out = torch.sigmoid(self.dense(out))
         return out
 
