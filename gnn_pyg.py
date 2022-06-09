@@ -17,9 +17,9 @@ wandb.init(project="PXD_SP" ) #  , mode="disabled"
 
 
 # %%
-batch_size = 256
+batch_size = 1024
 epochs = 100
-es_patience = 5
+es_patience = 10
 nEventsEach = 500000
 
 data = CreateGraphDataset("E:\ML_data/vt/data/slow_pions_evtgen_big.txt", nEventsEach, 1.0) \
@@ -32,15 +32,9 @@ idx_train, idx_val, idx_test = np.split(idxs, [int(0.6 * len(data)), int(0.8 * l
 
 train_loader = DataLoader([data[index] for index in idx_train], batch_size=batch_size, shuffle=True)
 val_loader = DataLoader([data[index] for index in idx_val], batch_size=batch_size)
-# test_loader = DataLoader([data[index] for index in idx_test], batch_size=batch_size)
-# test_loader1 = DataLoader([data[index] for index in idx_test if data[index].num_nodes == 1], batch_size=batch_size)
-# test_loader2 = DataLoader([data[index] for index in idx_test if data[index].num_nodes == 2], batch_size=batch_size)
-# test_loader3 = DataLoader([data[index] for index in idx_test if data[index].num_nodes > 2], batch_size=batch_size)
-
 # %%
-
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = Net(data[0], 1, 64).to(device) # .float() # pass data[0] to get node/edge_feature amount
+model = Net(data[0], 64).to(device) # .float() # pass data[0] to get node/edge_feature amount
 print(model)
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
@@ -86,7 +80,7 @@ for epoch in range(1, epochs + 1):
         best_val_loss = val_loss
         patience = es_patience
         print("New best val_loss {:.4f}".format(val_loss))
-        torch.save(model.state_dict(), 'model_best.pt')
+        torch.save(model.state_dict(), './model_best.pt')
     else :
         patience -= 1
         if patience == 0:
@@ -106,9 +100,7 @@ def predict(loader):
     return tar, prd
 
 # %%
-model.load_state_dict(torch.load('model_best.pt'))
+model.load_state_dict(torch.load('./model_best.pt'))
 model.eval()
-# test_loss = evaluate(test_loader1)
-# print("Test_loss {:.4f}".format(test_loss))
-
 LogWandb([data[index] for index in idx_test], model, device, 1024)
+wandb.save('./model_best.pt')

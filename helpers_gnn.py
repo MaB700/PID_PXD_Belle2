@@ -67,6 +67,7 @@ def CreateGraphDataset(path, n_samples, label):
 
         # Graph features
         # x [-2, 2] y [-2, 2] z [-8 , 8] r [0, 2]
+        # TODO: add ||pixel_grad||, (x_cog,y_cog) center of gravity of charge values, total/seed charge
         r = math.sqrt(global_pos[index, 0]**2 + global_pos[index, 1]**2)
         r = 0.0 if r < 2 else 1.0
         phi = np.arctan2(global_pos[index, 1], global_pos[index, 0])
@@ -79,7 +80,7 @@ def CreateGraphDataset(path, n_samples, label):
 
 
 class Net(torch.nn.Module):
-    def __init__(self, data, dim_out, hidden_nodes):
+    def __init__(self, data, hidden_nodes):
         super(Net, self).__init__()
         
         self.node_encoder = Linear(data.x.size(-1), hidden_nodes)
@@ -88,7 +89,10 @@ class Net(torch.nn.Module):
         self.conv1 = GENConv(hidden_nodes, hidden_nodes)
         self.conv2 = GENConv(hidden_nodes, hidden_nodes)
         self.conv3 = GENConv(hidden_nodes, hidden_nodes)
-        self.dense = Linear(hidden_nodes + data.graph_attr.size(-1), dim_out)
+        
+        self.dense1 = Linear(hidden_nodes + data.graph_attr.size(-1), 32)
+        self.dense2 = Linear(32, 32)
+        self.denseOut = Linear(32, data.y.size(-1))
         self.double()
 
     def forward(self, data):
@@ -101,9 +105,11 @@ class Net(torch.nn.Module):
         x = F.relu(self.conv2(x, edge_index, edge_attr))
         x = F.relu(self.conv3(x, edge_index, edge_attr))
         #x = F.dropout(x, training=self.training)
-        out = torch.cat((global_mean_pool(x, data.batch), graph_attr), dim=1)
-        out = torch.sigmoid(self.dense(out))
-        return out
+        # TODO: other ways the pool ?
+        x = torch.cat((global_mean_pool(x, data.batch), graph_attr), dim=1)
+        x = F.relu(self.dense1(x))
+        x = F.relu(self.dense2(x))
+        return torch.sigmoid(self.denseOut(x))
 
 
 class LogWandb():
@@ -114,7 +120,22 @@ class LogWandb():
                         DataLoader([d for d in data if d.num_nodes == 1], batch_size=batch_size), \
                         DataLoader([d for d in data if d.num_nodes == 2], batch_size=batch_size), \
                         DataLoader([d for d in data if d.num_nodes > 2], batch_size=batch_size) ]
+        test_loss = self.evaluate(self.loaders[0])
+        wandb.log({"test_loss": test_loss})
         self.log_all()
+
+    def evaluate(self, loader):
+        self.model.eval()
+        all_loss = 0
+        i = 0.0
+        for data in loader:
+            data = data.to(self.device)
+            output = self.model(data)
+            loss = F.binary_cross_entropy(output, data.y.unsqueeze(1), reduction="mean")
+            all_loss += loss.item()
+            i += 1.0
+    
+        return all_loss/i
 
     def predict(self, loader):
         self.model.eval()
