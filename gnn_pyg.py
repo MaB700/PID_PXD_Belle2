@@ -13,7 +13,7 @@ from torch_geometric.utils.convert import to_networkx
 
 from helpers_gnn import CreateGraphDataset, LogWandb, Net
 
-wandb.init(project="PXD_SP" ) #  , mode="disabled"
+wandb.init(project="PXD_SP") #   , mode="disabled"
 
 
 # %%
@@ -28,7 +28,7 @@ data = CreateGraphDataset("E:\ML_data/vt/data/slow_pions_evtgen_big.txt", nEvent
 # %%
 np.random.seed(123)
 idxs = np.random.permutation(len(data))
-idx_train, idx_val, idx_test = np.split(idxs, [int(0.44 * len(data)), int(0.61 * len(data))])
+idx_train, idx_val, idx_test = np.split(idxs, [int(0.6 * len(data)), int(0.8 * len(data))])
 
 train_loader = DataLoader([data[index] for index in idx_train], batch_size=batch_size, shuffle=True)
 val_loader = DataLoader([data[index] for index in idx_val], batch_size=batch_size)
@@ -37,6 +37,8 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = Net(data[0], 64).to(device) # .float() # pass data[0] to get node/edge_feature amount
 print(model)
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+# optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+# scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=1e-3, max_lr=1e-2, step_size_up=4, mode='triangular')
 
 def train_step():
     model.train()
@@ -51,7 +53,7 @@ def train_step():
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-
+    # scheduler.step()
     return all_loss/i
 
 def evaluate(loader):
@@ -103,4 +105,4 @@ def predict(loader):
 model.load_state_dict(torch.load('./model_best.pt'))
 model.eval()
 LogWandb([data[index] for index in idx_test], model, device, 1024)
-wandb.save('./model_best.pt')
+# wandb.save('./model_best.pt') # FIXME: no permission

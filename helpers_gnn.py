@@ -4,9 +4,9 @@ import math
 from tqdm import tqdm
 import torch
 from torch_geometric.data.data import Data
-from torch.nn import Linear
+import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import GCNConv, ARMAConv, GENConv, GeneralConv, global_mean_pool
+import torch_geometric.nn as geonn
 from torch_geometric.loader import DataLoader
 
 from sklearn.metrics import roc_auc_score, confusion_matrix, roc_curve
@@ -72,7 +72,19 @@ def CreateGraphDataset(path, n_samples, label):
         r = 0.0 if r < 2 else 1.0
         phi = np.arctan2(global_pos[index, 1], global_pos[index, 0])
         z = (global_pos[index, 2])/8.0
-        g = torch.tensor([r, math.sin(phi), z]).unsqueeze(0) # [0 or 1], [-1, 1], [-1, 1]
+        tot_charge = 0
+        cog_x = 0 # center of gravity x
+        cog_y = 0
+        for i in range(n):
+            tot_charge += adc[i]
+            cog_x += adc[i]*x[i, 1]
+            cog_y += adc[i]*x[i, 2]
+        cog_x = cog_x/tot_charge
+        cog_y = cog_y/tot_charge
+        avg_charge = tot_charge/(n*255.0)
+        g = torch.tensor([r, math.sin(phi), z, cog_x, cog_y, avg_charge]).unsqueeze(0) # [0 or 1], [-1, 1], [-1, 1]
+
+
         
         return Data(x=torch.from_numpy(x), edge_index=edge_index, edge_attr=edge_features, y=y, graph_attr=g)
 
@@ -83,16 +95,18 @@ class Net(torch.nn.Module):
     def __init__(self, data, hidden_nodes):
         super(Net, self).__init__()
         
-        self.node_encoder = Linear(data.x.size(-1), hidden_nodes)
-        self.edge_encoder = Linear(data.edge_attr.size(-1), hidden_nodes)
+        self.node_encoder = nn.Linear(data.x.size(-1), hidden_nodes)
+        self.edge_encoder = nn.Linear(data.edge_attr.size(-1), hidden_nodes)
         
-        self.conv1 = GENConv(hidden_nodes, hidden_nodes)
-        self.conv2 = GENConv(hidden_nodes, hidden_nodes)
-        self.conv3 = GENConv(hidden_nodes, hidden_nodes)
+        self.conv1 = geonn.GENConv(hidden_nodes, hidden_nodes)
+        self.conv2 = geonn.GENConv(hidden_nodes, hidden_nodes)
+        self.conv3 = geonn.GENConv(hidden_nodes, hidden_nodes)
         
-        self.dense1 = Linear(hidden_nodes + data.graph_attr.size(-1), 32)
-        self.dense2 = Linear(32, 32)
-        self.denseOut = Linear(32, data.y.size(-1))
+        self.dense1 = nn.Linear(hidden_nodes + data.graph_attr.size(-1), 32)
+        self.do1 = nn.Dropout(0.2)
+        self.dense2 = nn.Linear(32, 32)
+        self.do2 = nn.Dropout(0.2)
+        self.denseOut = nn.Linear(32, data.y.size(-1))
         self.double()
 
     def forward(self, data):
@@ -106,9 +120,11 @@ class Net(torch.nn.Module):
         x = F.relu(self.conv3(x, edge_index, edge_attr))
         #x = F.dropout(x, training=self.training)
         # TODO: other ways the pool ?
-        x = torch.cat((global_mean_pool(x, data.batch), graph_attr), dim=1)
+        x = torch.cat((geonn.global_mean_pool(x, data.batch), graph_attr), dim=1)
         x = F.relu(self.dense1(x))
+        x = self.do1(x)
         x = F.relu(self.dense2(x))
+        x = self.do2(x)
         return torch.sigmoid(self.denseOut(x))
 
 
