@@ -28,7 +28,7 @@ data = CreateGraphDataset("E:\ML_data/vt/data/slow_pions_evtgen_big.txt", nEvent
 # %%
 np.random.seed(123)
 idxs = np.random.permutation(len(data))
-idx_train, idx_val, idx_test = np.split(idxs, [int(0.6 * len(data)), int(0.8 * len(data))])
+idx_train, idx_val, idx_test = np.split(idxs, [int(0.44 * len(data)), int(0.61 * len(data))])
 
 train_loader = DataLoader([data[index] for index in idx_train], batch_size=batch_size, shuffle=True)
 val_loader = DataLoader([data[index] for index in idx_val], batch_size=batch_size)
