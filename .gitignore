@@ -1,3 +1,6 @@
 *.pt
 __pycache__/
 wandb/
+*.txt
+*.csv
+/results/

@@ -1,19 +1,18 @@
 # %%
 import numpy as np
-from tqdm import tqdm
 import torch
 import torch.nn.functional as F
 
 from torch.utils.data import DataLoader, Subset, ConcatDataset
 from helpers_cnn import *
 
-wandb.init(project="PXD_SP", notes='CNN' ) #  , mode="disabled"
+wandb.init(project="PXD_SP", notes='CNN', mode="disabled") #   
 
 # %%
-batch_size = 1024
-epochs = 10
-es_patience = 5
-nEventsEach = 500000
+batch_size = 2048
+epochs = 200
+es_patience = 100
+nEventsEach = 900000
 data = ConcatDataset([  CreateCNNDataset("E:\ML_data/vt/data/slow_pions_evtgen_big.txt", nEventsEach, 1.0),
                         CreateCNNDataset("E:\ML_data/vt/data/electron_big.txt", nEventsEach, 0.0)])
 np.random.seed(123)
@@ -22,9 +21,6 @@ idx_train, idx_val, idx_test = np.split(idxs, [int(0.44 * data.__len__()), int(0
 
 train_loader = DataLoader(Subset(data, idx_train), batch_size=batch_size, shuffle=True)
 val_loader = DataLoader(Subset(data, idx_val), batch_size=batch_size)
-# test_loader = DataLoader(Subset(data, idx_test), batch_size=batch_size)
-# TODO: add wandb and split into cluster sizes
-# something like [d for d in Subset(data, idx_test) if torch.count_nonzero(d['x'] > 0.001) == 1]
 # %%
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = Net().to(device)
@@ -69,7 +65,7 @@ for epoch in range(1, epochs + 1):
     train_loss = train_step()
     val_loss = evaluate(val_loader)
     print(f'Epoch: {epoch:02d}, loss: {train_loss:.5f}, val_loss: {val_loss:.5f}')
-    #wandb.log({ "train_loss": train_loss, "val_loss": val_loss })
+    wandb.log({ "train_loss": train_loss, "val_loss": val_loss })
 
     if val_loss < best_val_loss :
         best_val_loss = val_loss

@@ -1,44 +1,45 @@
 # %%
 import numpy as np
-from tqdm import tqdm
+import random
+import os
 import torch
 import torch.nn.functional as F
 from torch_geometric.loader import DataLoader
 
-from sklearn.metrics import roc_auc_score, confusion_matrix
+from helpers_gnn import CreateGraphDataset, LogWandb
+from meta_layer import *
 
 import wandb
-import networkx as nx
-from torch_geometric.utils.convert import to_networkx
-
-from helpers_gnn import CreateGraphDataset, LogWandb, Net
-
-wandb.init(project="PXD_SP") #   , mode="disabled"
-
-
+wandb.init(project="PXD_SP", mode='disabled') #   
 # %%
-batch_size = 1024
-epochs = 100
+batch_size = 512
+epochs = 200
 es_patience = 10
-nEventsEach = 500000
 
-data = CreateGraphDataset("E:\ML_data/vt/data/slow_pions_evtgen_big.txt", nEventsEach, 1.0) \
-     + CreateGraphDataset("E:\ML_data/vt/data/electron_big.txt", nEventsEach, 0.0)
-
+reload_dataset = True
+if os.path.exists('./dataset_fully_train.pt') and os.path.exists('./dataset_fully_test.pt') and not reload_dataset:
+    data = torch.load('./dataset_fully_train.pt', map_location=torch.device('cpu'))
+else:
+    data = CreateGraphDataset("E:\ML_data/vt/data/slow_pions_evtgen_big.txt", 900000, 1.0) \
+         + CreateGraphDataset("E:\ML_data/vt/data/electron_big.txt", 900000, 0.0)
+    # data = CreateGraphDataset("sp_balanced_train.txt", 450000, 1.0) \
+    #      + CreateGraphDataset("bg_balanced_train.txt", 450000, 0.0)    
+    random.shuffle(data)
+    # torch.save(data[:110000], './dataset_fully_train.pt')
+    torch.save(data[1100000:], './dataset_fully_test.pt')
+    data = data[:1100000]
 # %%
 np.random.seed(123)
-idxs = np.random.permutation(len(data))
-idx_train, idx_val, idx_test = np.split(idxs, [int(0.6 * len(data)), int(0.8 * len(data))])
-
+idx_train, idx_val = np.split(np.random.permutation(len(data)), [int(0.727 * len(data))])
 train_loader = DataLoader([data[index] for index in idx_train], batch_size=batch_size, shuffle=True)
 val_loader = DataLoader([data[index] for index in idx_val], batch_size=batch_size)
 # %%
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = Net(data[0], 64).to(device) # .float() # pass data[0] to get node/edge_feature amount
+model = GNN(data=data[0], n_layers=3, hidden_nodes=64, residuals=True, normalize=True).to(device)
 print(model)
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 # optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
-# scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=1e-3, max_lr=1e-2, step_size_up=4, mode='triangular')
+# scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[47, 60, 80], gamma=0.5, verbose=True)
 
 def train_step():
     model.train()
@@ -53,7 +54,7 @@ def train_step():
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-    # scheduler.step()
+    #scheduler.step()
     return all_loss/i
 
 def evaluate(loader):
@@ -102,7 +103,10 @@ def predict(loader):
     return tar, prd
 
 # %%
+del data
+data_test = torch.load('./dataset_fully_test.pt')
+# data_test = CreateGraphDataset("sp_test.txt", 450000, 1.0) \
+#           + CreateGraphDataset("bg_test.txt", 450000, 0.0)
 model.load_state_dict(torch.load('./model_best.pt'))
 model.eval()
-LogWandb([data[index] for index in idx_test], model, device, 1024)
-# wandb.save('./model_best.pt') # FIXME: no permission
+LogWandb(data_test, model, device, 1024)

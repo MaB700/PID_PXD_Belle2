@@ -117,7 +117,7 @@ class LogWandbCNN():
         for (idx, batch) in enumerate(loader):
             x = batch['x'].to(self.device)
             y = batch['y'].to(self.device)
-            pred = self.model(x).squeeze(1).cpu().detach().numpy() # TODO: check dim
+            pred = self.model(x).squeeze(1).cpu().detach().numpy()
             target = y.cpu().detach().numpy() # use batch['y'] directly
             tar = np.append(tar, target)
             prd = np.append(prd, np.array(pred))
@@ -131,17 +131,18 @@ class LogWandbCNN():
             wandb.log({"test_auc{:d}".format(i): auc})
             tn, fp, fn, tp = confusion_matrix(y_true=[1 if a_ > cut_value else 0 for a_ in gt], \
                                               y_pred=[1 if a_ > cut_value else 0 for a_ in pred]).ravel()
-            wandb.log({"test_prec{:d}".format(i): tp/(tp+fn)}) # efficiency
-            wandb.log({"test_sens{:d}".format(i): tp/(tp+fp)}) # purity
+            wandb.log({"test_sens{:d}".format(i): tp/(tp+fn)})
+            wandb.log({"test_prec{:d}".format(i): tp/(tp+fp)})
 
             wandb.log({"cm{:d}".format(i): wandb.plot.confusion_matrix(   probs=None,
                                                 y_true=[1 if a_ > cut_value else 0 for a_ in gt],
                                                 preds=[1 if a_ > cut_value else 0 for a_ in pred],
                                                 class_names=["background", "signal"],
                                                 title="CM{:d}".format(i))})
-
-            wandb.log({"roc{:d}".format(i): wandb.plot.roc_curve( gt, 
-                                        np.concatenate(((1-pred).reshape(-1,1),pred.reshape(-1,1)),axis=1), 
+            
+            len_roc = len(gt) if len(gt) <= 10000 else 10000
+            wandb.log({"roc{:d}".format(i): wandb.plot.roc_curve( gt[:len_roc], 
+                                        np.concatenate(((1-pred[:len_roc]).reshape(-1,1),pred[:len_roc].reshape(-1,1)),axis=1), 
                                         classes_to_plot=[1],
                                         title="ROC{:d}".format(i))})
     
