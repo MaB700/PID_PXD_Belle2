@@ -81,7 +81,7 @@ def CreateGraphDataset(path, n_samples, label, dist = 3):
                 for j in range(n):
                     if i == j :
                         continue
-                    if (x_pos[0, i]-x_pos[0, j]) <= dist and (y_pos[0, i]-y_pos[0, j]) <= dist :
+                    if abs(x_pos[0, i]-x_pos[0, j]) <= dist and abs(y_pos[0, i]-y_pos[0, j]) <= dist :
                         start_index = np.append(start_index, i) #TODO: replace np.append since it's a copy each call and slow
                         end_index = np.append(end_index, j)
             edge_index = np.row_stack((start_index, end_index))
