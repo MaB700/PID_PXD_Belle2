@@ -110,3 +110,53 @@ data_test = torch.load('./dataset_fully_test.pt')
 model.load_state_dict(torch.load('./model_best.pt'))
 model.eval()
 LogWandb(data_test, model, device, 1024)
+# %%
+# test_loader = DataLoader(data_test, batch_size=128)
+# model.eval()
+# # Calculate the saliency map
+# def saliency_map(model, data):    
+#     data.requires_grad_(*['x', 'edge_attr', 'u'], True)
+#     output = model(data)
+#     # grads = torch.autograd.functional.jacobian(lambda x, e, u: model.forward(x, e, u, data.edge_index, data.batch), 
+#     #                                     (data.x, data.edge_attr, data.u))
+#     dx, de, du = torch.autograd.grad(output, 
+#                                 inputs=[data.x, data.edge_attr, data.u],
+#                                 grad_outputs=torch.ones_like(output),
+#                                 retain_graph=True)
+
+#     return dx, de, du
+
+# def calc_grads(loader):
+#     du_sum = torch.tensor(0.0, dtype=torch.float64, device=device)
+#     i = 0
+#     du_x = np.array(())
+#     adc_x = np.array(())
+#     for data in loader :
+#         data = data.to(device)
+#         dx, de, du = saliency_map(model, data)
+#         # append all values of du[:, 7] into a numpy array
+#         du_x = np.append(du_x, du[:, 7].cpu().detach().numpy().flatten())
+#         adc_x = np.append(adc_x, data.u[:, 7].cpu().detach().numpy().flatten())
+#         du = torch.mean(du, dim=0)        
+#         du_sum = du_sum + du
+#         i += 1
+
+#     du_mean = du_sum.cpu().detach().numpy() / i
+#     return du_mean, du_x, adc_x
+
+# # measure time to calculate the saliency map
+# import time
+# start = time.time()
+# grads, du, adc = calc_grads(test_loader)
+# print(grads)
+# end = time.time()
+# print(end - start)
+
+# # plot du against adc using matplotlib
+# import matplotlib.pyplot as plt
+# plt.scatter(adc, du)
+# plt.xlabel('ADC')
+# plt.ylabel('du')
+# plt.show(block=True)
+
+# %%
