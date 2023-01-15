@@ -144,18 +144,18 @@ class GNN(torch.nn.Module):
                               Sigmoid())
         self.double()
 
-    def forward(self, data):
+    def forward(self, data): #data
 
         h, edge_index, edge_attr, u = data.x, data.edge_index, data.edge_attr, data.u
-
+        batch = data.batch
         # Message passing layers
         for layer in self.layers:
-            h, edge_attr, u = layer(h, edge_index, edge_attr, u, data.batch)
+            h, edge_attr, u = layer(h, edge_index, edge_attr, u, batch)
 
         # Multipooling layer
-        addpool = global_add_pool(h, data.batch)
-        meanpool = global_mean_pool(h, data.batch)
-        maxpool = global_max_pool(h, data.batch)
+        addpool = global_add_pool(h, batch)
+        meanpool = global_mean_pool(h, batch)
+        maxpool = global_max_pool(h, batch)
 
         out = torch.cat([addpool,meanpool,maxpool,u], dim=1)
 
